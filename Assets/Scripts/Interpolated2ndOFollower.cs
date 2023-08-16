@@ -1,56 +1,78 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngineInternal;
-
-public class SecondOrderFollower : MonoBehaviour {
-    [SerializeField] Interpolated2ndOFollower test;
-    public bool badTrigger = false;
-    public Transform targetObj;
-    [Range(0f,100)] public float f;
-    [Range(0,5)] public float z=0.5f;
-    [Range(-20,20)] public float r=0;
+[Serializable]
+public class Interpolated2ndOFollower{
+    // TODO: Add handling of rotation in case the Vector3 was a rotation vector
+    //      and we want to adjust going beyond 4*pi or such... next update
+    [Range(0, 100)] public float f;
+    [Range(0, 5)] public float z = 0.5f;
+    [Range(-20, 20)] public float r = 0;
+    public Transform follower, target;
+    public bool ignoreX = false, ignoreY = false, ignoreZ = false;
     private float k1, k2, k3;
-    float _w, _z, _d;
-
     private Vector3 xPrev, y, yDer;
     private float TCrit;
-    // Start is called before the first frame update
-    void Start() {
-        InitStates();
-    }
-    private void InitStates() {
-        xPrev = y = targetObj.position;
+    private float useT;
+    public void Init() {
+        xPrev = y = target.position;
         yDer = Vector3.zero;
         if (f == 0) f = 0.0001f;
     }
-
-    // Update is called once per frame
-    void Update() {
-        if (badTrigger)
-            return;
-        try {
-            CalcKs();
-            InterpolatePosition(targetObj.position);
-        } catch (System.Exception e){
-            Debug.LogException(e);
-            badTrigger = true;
-            y = transform.position;
-            yDer = Vector3.zero;
-        }
+    public void Follow(float timePass) {
+        useT = timePass;
+        CalcKs();
+        InterpolatePosition(target.position);
     }
     private void CalcKs() {
-
         float temp = Mathf.PI * f;
         k1 = z / (temp);
         temp *= 2;
         k2 = 1 / (temp * temp);
         k3 = r * z / temp;
-        TCrit = 0.8f * (Mathf.Sqrt(4 * k2 + k1 * k1) - k1); 
+        TCrit = 0.8f * (Mathf.Sqrt(4 * k2 + k1 * k1) - k1);
         // 0.8f to be safe, but T needs to be less than this to have a decreasing magnitude
         //  so that the system stays stable
     }
 
+
+    private void InterpolatePosition(Vector3 targetPos) {
+        Vector3 newPosition = Vector3.zero;
+        newPosition = Interpolate2ndOrder(targetPos);
+
+        if (ignoreX)
+            newPosition.x = follower.position.x;
+        if (ignoreY)
+            newPosition.y = follower.position.y;
+        if (ignoreZ)
+            newPosition.z = follower.position.z;
+
+        follower.position = newPosition;
+    }
+    private Vector3 Interpolate2ndOrder(Vector3 xCur) { // T critical constraint
+        float T = useT;
+        //Update xDer and calculate x[n+1]
+
+        Vector3 xDer = (xCur - xPrev) / T;
+        xPrev = xCur;
+
+        int numOfInterpols = Mathf.CeilToInt(Time.deltaTime / TCrit);
+        T = T / numOfInterpols; // apply the movement in smaller steps to compensate
+
+        for (int i = 0; i < numOfInterpols; i++) {
+            y = y + T * yDer;
+            Vector3 yDer2 = (xCur + k3 * xDer - y - k1 * yDer) / k2;
+            yDer = yDer + T * yDer2;
+        }
+        return y;
+    }
+
+
+
+
+    /*
+    private float _w, _z, _d;
     private void CalcZeroPoleVals() {
         float temp = Mathf.PI * f;
         k1 = z / (temp);
@@ -60,40 +82,12 @@ public class SecondOrderFollower : MonoBehaviour {
         _z = z;
         _d = _w * Mathf.Sqrt(Mathf.Abs(z * z - 1));
 
-        k2 = 1 / (_w*_w);
+        k2 = 1 / (_w * _w);
         k3 = r * z / _w;
     }
-    private void InterpolatePosition(Vector3 target) {
-        Vector3 newPosition=Vector3.zero;
-        //newPosition.x = Interpolate2ndOrder(transform.position.x, target.x, 0);
-        //newPosition.y = Interpolate2ndOrder(transform.position.y, target.y, 1);
-        //newPosition.z = Interpolate2ndOrder(transform.position.z, target.z, 2);
-       
-        newPosition = Interpolate2ndOrder(target);
 
-        transform.position = newPosition;
-    }
-    
-    private Vector3 Interpolate2ndOrder(Vector3 xCur) { // T critical constraint
-        float T = Time.deltaTime;
-        //Update xDer and calculate x[n+1]
-
-        Vector3 xDer = (xCur - xPrev) / T;
-        xPrev = xCur;
-
-        int numOfInterpols = Mathf.CeilToInt(Time.deltaTime / TCrit);
-        T = T / numOfInterpols; // apply the movement in smaller steps to compensate
-        
-        for(int i = 0; i < numOfInterpols; i++) {
-            y = y + T * yDer;
-            Vector3 yDer2 = (xCur + k3 * xDer - y - k1 * yDer) / k2;
-            yDer = yDer + T * yDer2;
-        }
-        return y;
-    }
-
-    private Vector3 Interpolate2ndOrder_ConstrainedK2Variant(Vector3 xCur) { 
-        float T = Time.deltaTime;
+    private Vector3 Interpolate2ndOrder_ConstrainedK2Variant(Vector3 xCur) {
+        float T = useT;
         //Update xDer and calculate x[n+1]
 
         Vector3 xDer = (xCur - xPrev) / T;
@@ -115,7 +109,7 @@ public class SecondOrderFollower : MonoBehaviour {
 
     // final variant is pole zero matching to get best accuracy
     private Vector3 Interpolate2ndOrder_ZeroPole(Vector3 xCur) {
-        float T = Time.deltaTime;
+        float T = useT;
         //Update xDer and calculate x[n+1]
 
         float k1_stable, k2_stable;
@@ -142,5 +136,5 @@ public class SecondOrderFollower : MonoBehaviour {
         yDer = yDer + T * yDer2;
         return y;
     }
-
+    //*/
 }
